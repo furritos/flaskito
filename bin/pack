@@ -1,5 +1,5 @@
 #!/bin/sh
-
+mkdir -p dist
 (cd src && jar cvf ../dist/flaskito.war .)
 
 echo
