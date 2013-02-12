@@ -25,14 +25,12 @@
 	See the documenation for more details.
 	http://modjy.xhaus.com/locating.html#locating_callables
 -->
-<!--
 	This is the app_import_name mechanism. If you specify a value
 	for this variable, then it will take precedence over the other mechanism
     <init-param>
       <param-name>app_import_name</param-name>
-      <param-value>my_wsgi_module.my_handler_class().handler_method</param-value>
+      <param-value>flaskito.app</param-value>
     </init-param>
--->
 <!--
 	And this is the app_directory/app_filename/app_callable_name combo
 	The defaults for these three variables are ""/application.py/handler
@@ -44,18 +42,22 @@
       <param-value>some_sub_directory</param-value>
     </init-param>
 -->
+<!--
     <init-param>
       <param-name>app_filename</param-name>
       <param-value>flaskito.py</param-value>
     </init-param>
+-->
 <!--
 	Supply a value for this parameter if you want your application
 	callable to have a different name than the default.
     -->
+	<!--
     <init-param>
       <param-name>app_callable_name</param-name>
       <param-value>app</param-value>
     </init-param>
+	-->
 	<!-- Do you want application callables to be cached? -->
     <init-param>
       <param-name>cache_callables</param-name>
