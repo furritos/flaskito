@@ -11,10 +11,12 @@
   <servlet>
     <servlet-name>modjy</servlet-name>
     <servlet-class>com.xhaus.modjy.ModjyJServlet</servlet-class>
+<!--
     <init-param>
       <param-name>python.home</param-name>
-      <param-value>/usr/local/Cellar/jython/2.5.1/libexec</param-value>
+      <param-value>/usr/local/Cellar/jython/2.5.2/libexec</param-value>
     </init-param>
+-->
 <!--
 	There are two different ways you can specify an application to modjy
 	1. Using the app_import_name mechanism
