@@ -5,24 +5,39 @@
 
     Implements the WSGI wrappers (request and response).
 
-    :copyright: (c) 2010 by Armin Ronacher.
+    :copyright: (c) 2011 by Armin Ronacher.
     :license: BSD, see LICENSE for more details.
 """
 
-from werkzeug import Request as RequestBase, Response as ResponseBase, \
-    cached_property
+from werkzeug.wrappers import Request as RequestBase, Response as ResponseBase
+from werkzeug.exceptions import BadRequest
 
-from .helpers import json, _assert_have_json
+from .debughelpers import attach_enctype_error_multidict
+from . import json
 from .globals import _request_ctx_stack
 
 
+_missing = object()
+
+
+def _get_data(req, cache):
+    getter = getattr(req, 'get_data', None)
+    if getter is not None:
+        return getter(cache=cache)
+    return req.data
+
+
 class Request(RequestBase):
-    """The request object used by default in flask.  Remembers the
+    """The request object used by default in Flask.  Remembers the
     matched endpoint and view arguments.
 
     It is what ends up as :class:`~flask.request`.  If you want to replace
     the request object used you can subclass this and set
     :attr:`~flask.Flask.request_class` to your subclass.
+
+    The request object is a :class:`~werkzeug.wrappers.Request` subclass and
+    provides all of the attributes Werkzeug defines plus a few Flask
+    specific ones.
     """
 
     #: the internal URL rule that matched the request.  This can be
@@ -41,6 +56,10 @@ class Request(RequestBase):
     #: usually a :exc:`~werkzeug.exceptions.NotFound` exception or
     #: something similar.
     routing_exception = None
+
+    # switched by the request context until 1.0 to opt in deprecated
+    # module functionality
+    _is_old_module = False
 
     @property
     def max_content_length(self):
@@ -61,24 +80,101 @@ class Request(RequestBase):
 
     @property
     def module(self):
-        """The name of the current module"""
+        """The name of the current module if the request was dispatched
+        to an actual module.  This is deprecated functionality, use blueprints
+        instead.
+        """
+        from warnings import warn
+        warn(DeprecationWarning('modules were deprecated in favor of '
+                                'blueprints.  Use request.blueprint '
+                                'instead.'), stacklevel=2)
+        if self._is_old_module:
+            return self.blueprint
+
+    @property
+    def blueprint(self):
+        """The name of the current blueprint"""
         if self.url_rule and '.' in self.url_rule.endpoint:
             return self.url_rule.endpoint.rsplit('.', 1)[0]
 
-    @cached_property
+    @property
     def json(self):
         """If the mimetype is `application/json` this will contain the
-        parsed JSON data.
+        parsed JSON data.  Otherwise this will be `None`.
+
+        The :meth:`get_json` method should be used instead.
         """
-        if __debug__:
-            _assert_have_json()
-        if self.mimetype == 'application/json':
-            return json.loads(self.data)
+        # XXX: deprecate property
+        return self.get_json()
+
+    def get_json(self, force=False, silent=False, cache=True):
+        """Parses the incoming JSON request data and returns it.  If
+        parsing fails the :meth:`on_json_loading_failed` method on the
+        request object will be invoked.  By default this function will
+        only load the json data if the mimetype is ``application/json``
+        but this can be overriden by the `force` parameter.
+
+        :param force: if set to `True` the mimetype is ignored.
+        :param silent: if set to `False` this method will fail silently
+                       and return `False`.
+        :param cache: if set to `True` the parsed JSON data is remembered
+                      on the request.
+        """
+        rv = getattr(self, '_cached_json', _missing)
+        if rv is not _missing:
+            return rv
+
+        if self.mimetype != 'application/json' and not force:
+            return None
+
+        # We accept a request charset against the specification as
+        # certain clients have been using this in the past.  This
+        # fits our general approach of being nice in what we accept
+        # and strict in what we send out.
+        request_charset = self.mimetype_params.get('charset')
+        try:
+            data = _get_data(self, cache)
+            if request_charset is not None:
+                rv = json.loads(data, encoding=request_charset)
+            else:
+                rv = json.loads(data)
+        except ValueError as e:
+            if silent:
+                rv = None
+            else:
+                rv = self.on_json_loading_failed(e)
+        if cache:
+            self._cached_json = rv
+        return rv
+
+    def on_json_loading_failed(self, e):
+        """Called if decoding of the JSON data failed.  The return value of
+        this method is used by :meth:`get_json` when an error occurred.  The
+        default implementation just raises a :class:`BadRequest` exception.
+
+        .. versionchanged:: 0.10
+           Removed buggy previous behavior of generating a random JSON
+           response.  If you want that behavior back you can trivially
+           add it by subclassing.
+
+        .. versionadded:: 0.8
+        """
+        raise BadRequest()
+
+    def _load_form_data(self):
+        RequestBase._load_form_data(self)
+
+        # in debug mode we're replacing the files multidict with an ad-hoc
+        # subclass that raises a different error for key errors.
+        ctx = _request_ctx_stack.top
+        if ctx is not None and ctx.app.debug and \
+           self.mimetype != 'multipart/form-data' and not self.files:
+            attach_enctype_error_multidict(self)
 
 
 class Response(ResponseBase):
-    """The response object that is used by default in flask.  Works like the
-    response object from Werkzeug but is set to have a HTML mimetype by
+    """The response object that is used by default in Flask.  Works like the
+    response object from Werkzeug but is set to have an HTML mimetype by
     default.  Quite often you don't have to create this object yourself because
     :meth:`~flask.Flask.make_response` will take care of that for you.
 

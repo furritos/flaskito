@@ -5,35 +5,24 @@
 
     This module implements context-local objects.
 
-    :copyright: (c) 2010 by the Werkzeug Team, see AUTHORS for more details.
+    :copyright: (c) 2014 by the Werkzeug Team, see AUTHORS for more details.
     :license: BSD, see LICENSE for more details.
 """
-try:
-    from greenlet import getcurrent as get_current_greenlet
-except ImportError: # pragma: no cover
-    try:
-        from py.magic import greenlet
-        get_current_greenlet = greenlet.getcurrent
-        del greenlet
-    except:
-        # catch all, py.* fails with so many different errors.
-        get_current_greenlet = int
-try:
-    from thread import get_ident as get_current_thread, allocate_lock
-except ImportError: # pragma: no cover
-    from dummy_thread import get_ident as get_current_thread, allocate_lock
-
+import copy
+from functools import update_wrapper
 from werkzeug.wsgi import ClosingIterator
-from werkzeug._internal import _patch_wrapper
+from werkzeug._compat import PY2, implements_bool
 
-
-# get the best ident function.  if greenlets are not installed we can
-# safely just use the builtin thread function and save a python methodcall
-# and the cost of calculating a hash.
-if get_current_greenlet is int: # pragma: no cover
-    get_ident = get_current_thread
-else:
-    get_ident = lambda: (get_current_thread(), get_current_greenlet())
+# since each thread has its own greenlet we can just use those as identifiers
+# for the context.  If greenlets are not available we fall back to the
+# current thread ident depending on where it is.
+try:
+    from greenlet import getcurrent as get_ident
+except ImportError:
+    try:
+        from thread import get_ident
+    except ImportError:
+        from _thread import get_ident
 
 
 def release_local(local):
@@ -49,7 +38,7 @@ def release_local(local):
         False
 
     With this function one can release :class:`Local` objects as well
-    as :class:`StackLocal` objects.  However it is not possible to
+    as :class:`LocalStack` objects.  However it is not possible to
     release data held by proxies that way, one always has to retain
     a reference to the underlying local object in order to be able
     to release it.
@@ -60,56 +49,45 @@ def release_local(local):
 
 
 class Local(object):
-    __slots__ = ('__storage__', '__lock__')
+    __slots__ = ('__storage__', '__ident_func__')
 
     def __init__(self):
         object.__setattr__(self, '__storage__', {})
-        object.__setattr__(self, '__lock__', allocate_lock())
+        object.__setattr__(self, '__ident_func__', get_ident)
 
     def __iter__(self):
-        return self.__storage__.iteritems()
+        return iter(self.__storage__.items())
 
     def __call__(self, proxy):
         """Create a proxy for a name."""
         return LocalProxy(self, proxy)
 
     def __release_local__(self):
-        self.__storage__.pop(get_ident(), None)
+        self.__storage__.pop(self.__ident_func__(), None)
 
     def __getattr__(self, name):
-        self.__lock__.acquire()
         try:
-            try:
-                return self.__storage__[get_ident()][name]
-            except KeyError:
-                raise AttributeError(name)
-        finally:
-            self.__lock__.release()
+            return self.__storage__[self.__ident_func__()][name]
+        except KeyError:
+            raise AttributeError(name)
 
     def __setattr__(self, name, value):
-        self.__lock__.acquire()
+        ident = self.__ident_func__()
+        storage = self.__storage__
         try:
-            ident = get_ident()
-            storage = self.__storage__
-            if ident in storage:
-                storage[ident][name] = value
-            else:
-                storage[ident] = {name: value}
-        finally:
-            self.__lock__.release()
+            storage[ident][name] = value
+        except KeyError:
+            storage[ident] = {name: value}
 
     def __delattr__(self, name):
-        self.__lock__.acquire()
         try:
-            try:
-                del self.__storage__[get_ident()][name]
-            except KeyError:
-                raise AttributeError(name)
-        finally:
-            self.__lock__.release()
+            del self.__storage__[self.__ident_func__()][name]
+        except KeyError:
+            raise AttributeError(name)
 
 
 class LocalStack(object):
+
     """This class works similar to a :class:`Local` but keeps a stack
     of objects instead.  This is best explained with an example::
 
@@ -138,10 +116,17 @@ class LocalStack(object):
 
     def __init__(self):
         self._local = Local()
-        self._lock = allocate_lock()
 
     def __release_local__(self):
         self._local.__release_local__()
+
+    def _get__ident_func__(self):
+        return self._local.__ident_func__
+
+    def _set__ident_func__(self, value):
+        object.__setattr__(self._local, '__ident_func__', value)
+    __ident_func__ = property(_get__ident_func__, _set__ident_func__)
+    del _get__ident_func__, _set__ident_func__
 
     def __call__(self):
         def _lookup():
@@ -153,32 +138,24 @@ class LocalStack(object):
 
     def push(self, obj):
         """Pushes a new item to the stack"""
-        self._lock.acquire()
-        try:
-            rv = getattr(self._local, 'stack', None)
-            if rv is None:
-                self._local.stack = rv = []
-            rv.append(obj)
-            return rv
-        finally:
-            self._lock.release()
+        rv = getattr(self._local, 'stack', None)
+        if rv is None:
+            self._local.stack = rv = []
+        rv.append(obj)
+        return rv
 
     def pop(self):
         """Removes the topmost item from the stack, will return the
         old value or `None` if the stack was already empty.
         """
-        self._lock.acquire()
-        try:
-            stack = getattr(self._local, 'stack', None)
-            if stack is None:
-                return None
-            elif len(stack) == 1:
-                release_local(self._local)
-                return stack[-1]
-            else:
-                return stack.pop()
-        finally:
-            self._lock.release()
+        stack = getattr(self._local, 'stack', None)
+        if stack is None:
+            return None
+        elif len(stack) == 1:
+            release_local(self._local)
+            return stack[-1]
+        else:
+            return stack.pop()
 
     @property
     def top(self):
@@ -192,37 +169,54 @@ class LocalStack(object):
 
 
 class LocalManager(object):
+
     """Local objects cannot manage themselves. For that you need a local
     manager.  You can pass a local manager multiple locals or add them later
     by appending them to `manager.locals`.  Everytime the manager cleans up
     it, will clean up all the data left in the locals for this context.
 
+    The `ident_func` parameter can be added to override the default ident
+    function for the wrapped locals.
+
     .. versionchanged:: 0.6.1
        Instead of a manager the :func:`release_local` function can be used
        as well.
+
+    .. versionchanged:: 0.7
+       `ident_func` was added.
     """
 
-    def __init__(self, locals=None):
+    def __init__(self, locals=None, ident_func=None):
         if locals is None:
             self.locals = []
         elif isinstance(locals, Local):
             self.locals = [locals]
         else:
             self.locals = list(locals)
+        if ident_func is not None:
+            self.ident_func = ident_func
+            for local in self.locals:
+                object.__setattr__(local, '__ident_func__', ident_func)
+        else:
+            self.ident_func = get_ident
 
     def get_ident(self):
         """Return the context identifier the local objects use internally for
         this context.  You cannot override this method to change the behavior
         but use it to link other context local objects (such as SQLAlchemy's
         scoped sessions) to the Werkzeug locals.
+
+        .. versionchanged:: 0.7
+           You can pass a different ident function to the local manager that
+           will then be propagated to all the locals passed to the
+           constructor.
         """
-        return get_ident()
+        return self.ident_func()
 
     def cleanup(self):
         """Manually clean up the data in the locals for this context.  Call
         this at the end of the request or use `make_middleware()`.
         """
-        ident = self.get_ident()
         for local in self.locals:
             release_local(local)
 
@@ -247,7 +241,7 @@ class LocalManager(object):
         will have all the arguments copied from the inner application
         (name, docstring, module).
         """
-        return _patch_wrapper(func, self.make_middleware(func))
+        return update_wrapper(self.make_middleware(func), func)
 
     def __repr__(self):
         return '<%s storages: %d>' % (
@@ -256,14 +250,16 @@ class LocalManager(object):
         )
 
 
+@implements_bool
 class LocalProxy(object):
+
     """Acts as a proxy for a werkzeug local.  Forwards all operations to
     a proxied object.  The only operations not supported for forwarding
     are right handed operands and any kind of assignment.
 
     Example usage::
 
-        from werkzeug import Local
+        from werkzeug.local import Local
         l = Local()
 
         # these are proxies
@@ -271,7 +267,7 @@ class LocalProxy(object):
         user = l('user')
 
 
-        from werkzeug import LocalStack
+        from werkzeug.local import LocalStack
         _response_local = LocalStack()
 
         # this is a proxy
@@ -314,7 +310,7 @@ class LocalProxy(object):
         try:
             return self._get_current_object().__dict__
         except RuntimeError:
-            return AttributeError('__dict__')
+            raise AttributeError('__dict__')
 
     def __repr__(self):
         try:
@@ -323,7 +319,7 @@ class LocalProxy(object):
             return '<%s unbound>' % self.__class__.__name__
         return repr(obj)
 
-    def __nonzero__(self):
+    def __bool__(self):
         try:
             return bool(self._get_current_object())
         except RuntimeError:
@@ -331,7 +327,7 @@ class LocalProxy(object):
 
     def __unicode__(self):
         try:
-            return unicode(self._get_current_object())
+            return unicode(self._get_current_object())  # noqa
         except RuntimeError:
             return repr(self)
 
@@ -352,11 +348,14 @@ class LocalProxy(object):
     def __delitem__(self, key):
         del self._get_current_object()[key]
 
-    def __setslice__(self, i, j, seq):
-        self._get_current_object()[i:j] = seq
+    if PY2:
+        __getslice__ = lambda x, i, j: x._get_current_object()[i:j]
 
-    def __delslice__(self, i, j):
-        del self._get_current_object()[i:j]
+        def __setslice__(self, i, j, seq):
+            self._get_current_object()[i:j] = seq
+
+        def __delslice__(self, i, j):
+            del self._get_current_object()[i:j]
 
     __setattr__ = lambda x, n, v: setattr(x._get_current_object(), n, v)
     __delattr__ = lambda x, n: delattr(x._get_current_object(), n)
@@ -367,14 +366,13 @@ class LocalProxy(object):
     __ne__ = lambda x, o: x._get_current_object() != o
     __gt__ = lambda x, o: x._get_current_object() > o
     __ge__ = lambda x, o: x._get_current_object() >= o
-    __cmp__ = lambda x, o: cmp(x._get_current_object(), o)
+    __cmp__ = lambda x, o: cmp(x._get_current_object(), o)  # noqa
     __hash__ = lambda x: hash(x._get_current_object())
     __call__ = lambda x, *a, **kw: x._get_current_object()(*a, **kw)
     __len__ = lambda x: len(x._get_current_object())
     __getitem__ = lambda x, i: x._get_current_object()[i]
     __iter__ = lambda x: iter(x._get_current_object())
     __contains__ = lambda x, i: i in x._get_current_object()
-    __getslice__ = lambda x, i, j: x._get_current_object()[i:j]
     __add__ = lambda x, o: x._get_current_object() + o
     __sub__ = lambda x, o: x._get_current_object() - o
     __mul__ = lambda x, o: x._get_current_object() * o
@@ -395,11 +393,24 @@ class LocalProxy(object):
     __invert__ = lambda x: ~(x._get_current_object())
     __complex__ = lambda x: complex(x._get_current_object())
     __int__ = lambda x: int(x._get_current_object())
-    __long__ = lambda x: long(x._get_current_object())
+    __long__ = lambda x: long(x._get_current_object())  # noqa
     __float__ = lambda x: float(x._get_current_object())
     __oct__ = lambda x: oct(x._get_current_object())
     __hex__ = lambda x: hex(x._get_current_object())
     __index__ = lambda x: x._get_current_object().__index__()
-    __coerce__ = lambda x, o: x.__coerce__(x, o)
-    __enter__ = lambda x: x.__enter__()
-    __exit__ = lambda x, *a, **kw: x.__exit__(*a, **kw)
+    __coerce__ = lambda x, o: x._get_current_object().__coerce__(x, o)
+    __enter__ = lambda x: x._get_current_object().__enter__()
+    __exit__ = lambda x, *a, **kw: x._get_current_object().__exit__(*a, **kw)
+    __radd__ = lambda x, o: o + x._get_current_object()
+    __rsub__ = lambda x, o: o - x._get_current_object()
+    __rmul__ = lambda x, o: o * x._get_current_object()
+    __rdiv__ = lambda x, o: o / x._get_current_object()
+    if PY2:
+        __rtruediv__ = lambda x, o: x._get_current_object().__rtruediv__(o)
+    else:
+        __rtruediv__ = __rdiv__
+    __rfloordiv__ = lambda x, o: o // x._get_current_object()
+    __rmod__ = lambda x, o: o % x._get_current_object()
+    __rdivmod__ = lambda x, o: x._get_current_object().__rdivmod__(o)
+    __copy__ = lambda x: copy.copy(x._get_current_object())
+    __deepcopy__ = lambda x, memo: copy.deepcopy(x._get_current_object(), memo)

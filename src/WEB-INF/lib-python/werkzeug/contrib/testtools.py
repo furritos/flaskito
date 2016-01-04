@@ -9,13 +9,19 @@
         A response wrapper which adds various cached attributes for
         simplified assertions on various content types.
 
-    :copyright: (c) 2010 by the Werkzeug Team, see AUTHORS for more details.
+    :copyright: (c) 2014 by the Werkzeug Team, see AUTHORS for more details.
     :license: BSD, see LICENSE for more details.
 """
-from werkzeug import Response, cached_property, import_string
+from werkzeug.utils import cached_property, import_string
+from werkzeug.wrappers import Response
+
+from warnings import warn
+warn(DeprecationWarning('werkzeug.contrib.testtools is deprecated and '
+                        'will be removed with Werkzeug 1.0'))
 
 
 class ContentAccessors(object):
+
     """
     A mixin class for response objects that provides a couple of useful
     accessors for unittesting.
@@ -45,7 +51,7 @@ class ContentAccessors(object):
             from lxml.html import fromstring
         except ImportError:
             fromstring = etree.HTML
-        if self.mimetype=='text/html':
+        if self.mimetype == 'text/html':
             return fromstring(self.data)
         return etree.XML(self.data)
     lxml = cached_property(lxml)
@@ -56,11 +62,12 @@ class ContentAccessors(object):
             raise AttributeError('Not a JSON response')
         try:
             from simplejson import loads
-        except:
+        except ImportError:
             from json import loads
         return loads(self.data)
     json = cached_property(json)
 
 
 class TestResponse(Response, ContentAccessors):
+
     """Pass this to `werkzeug.test.Client` for easier unittesting."""

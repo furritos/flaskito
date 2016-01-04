@@ -5,22 +5,23 @@
 
     Interactive console support.
 
-    :copyright: (c) 2010 by the Werkzeug Team, see AUTHORS for more details.
+    :copyright: (c) 2014 by the Werkzeug Team, see AUTHORS for more details.
     :license: BSD.
 """
 import sys
 import code
 from types import CodeType
+
 from werkzeug.utils import escape
 from werkzeug.local import Local
 from werkzeug.debug.repr import debug_repr, dump, helper
-from werkzeug.debug.utils import render_template
 
 
 _local = Local()
 
 
 class HTMLStringO(object):
+
     """A StringO version that HTML escapes on write."""
 
     def __init__(self):
@@ -36,10 +37,14 @@ class HTMLStringO(object):
         pass
 
     def seek(self, n, mode=0):
-        raise IOError('Bad file descriptor')
+        pass
 
     def readline(self):
-        raise IOError('Bad file descriptor')
+        if len(self._buffer) == 0:
+            return ''
+        ret = self._buffer[0]
+        del self._buffer[0]
+        return ret
 
     def reset(self):
         val = ''.join(self._buffer)
@@ -47,7 +52,7 @@ class HTMLStringO(object):
         return val
 
     def _write(self, x):
-        if isinstance(x, str):
+        if isinstance(x, bytes):
             x = x.decode('utf-8', 'replace')
         self._buffer.append(x)
 
@@ -59,6 +64,7 @@ class HTMLStringO(object):
 
 
 class ThreadedStream(object):
+
     """Thread-local wrapper for sys.stdout for the interactive console."""
 
     def push():
@@ -83,6 +89,7 @@ class ThreadedStream(object):
         # stream._write bypasses escaping as debug_repr is
         # already generating HTML for us.
         if obj is not None:
+            _local._current_ipy.locals['_'] = obj
             stream._write(debug_repr(obj))
     displayhook = staticmethod(displayhook)
 
@@ -131,6 +138,7 @@ class _ConsoleLoader(object):
 
 def _wrap_compiler(console):
     compile = console.compile
+
     def func(source, filename, symbol):
         code = compile(source, filename, symbol)
         console.loader.register(code, source)
@@ -157,7 +165,7 @@ class _InteractiveConsole(code.InteractiveInterpreter):
         try:
             source_to_eval = ''.join(self.buffer + [source])
             if code.InteractiveInterpreter.runsource(self,
-               source_to_eval, '<debugger>', 'single'):
+                                                     source_to_eval, '<debugger>', 'single'):
                 self.more = True
                 self.buffer.append(source)
             else:
@@ -169,8 +177,8 @@ class _InteractiveConsole(code.InteractiveInterpreter):
 
     def runcode(self, code):
         try:
-            exec code in self.globals, self.locals
-        except:
+            eval(code, self.globals, self.locals)
+        except Exception:
             self.showtraceback()
 
     def showtraceback(self):
@@ -188,6 +196,7 @@ class _InteractiveConsole(code.InteractiveInterpreter):
 
 
 class Console(object):
+
     """An interactive console."""
 
     def __init__(self, globals=None, locals=None):
@@ -198,4 +207,9 @@ class Console(object):
         self._ipy = _InteractiveConsole(globals, locals)
 
     def eval(self, code):
-        return self._ipy.runsource(code)
+        _local._current_ipy = self._ipy
+        old_sys_stdout = sys.stdout
+        try:
+            return self._ipy.runsource(code)
+        finally:
+            sys.stdout = old_sys_stdout

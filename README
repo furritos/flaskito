@@ -1,10 +1,12 @@
-Flaskito is a simple Python web application that was built using Flask Microframework and structured to run by Jython on any Java web container thru the Modjy WSGI adapter. I build it just as example to show people how to do it because googling, you will just see samples using Pylons or Django. Just for it, nothing any more.
+Flaskito is a simple Python web application that was built using Flask Microframework and structured to run with Jython 2.7.1b2 on any Java web container thru the Modjy WSGI adapter.
+This was built as an example to demonstrate and showcase that Flask can be "templated" and "WAR'd" without the usage of Pylons or Django (or django-jython or snakefight). 
 
-To run it:
+To build the WAR file:
 
     $ ./bin/pack
+
+To deploy the WAR file (not upgraded):
+
     $ ./bin/deploy
     
-WARNING: There is a good chance you need to adjust the deploy and undeploy scripts to fit your environment, because I wrote them fitting to my Jetty WebServer.
-
-And finally, it doesn't do anything important.  :p
+WARNING: There is a good chance you need to adjust the deploy and undeploy scripts to fit your environment.  This has been confirmed to work in Tomcat 7.0.57.

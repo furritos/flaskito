@@ -9,28 +9,33 @@
     .. _Trac: http://trac.edgewall.org/
     .. _Django: http://www.djangoproject.com/
 
-    :copyright: (c) 2010 by the Werkzeug Team, see AUTHORS for more details.
+    :copyright: (c) 2014 by the Werkzeug Team, see AUTHORS for more details.
     :license: BSD, see LICENSE for more details.
 """
 from warnings import warn
 
-from werkzeug import LimitedStream
+from werkzeug.wsgi import LimitedStream
 
 
 class StreamLimitMiddleware(object):
+
     """Limits the input stream to a given number of bytes.  This is useful if
     you have a WSGI application that reads form data into memory (django for
     example) and you don't want users to harm the server by uploading tons of
     data.
 
     Default is 10MB
+
+    .. versionchanged:: 0.9
+       Deprecated middleware.
     """
 
     def __init__(self, app, maximum_size=1024 * 1024 * 10):
+        warn(DeprecationWarning('This middleware is deprecated'))
         self.app = app
         self.maximum_size = maximum_size
 
     def __call__(self, environ, start_response):
-        limit = min(limit, int(environ.get('CONTENT_LENGTH') or 0))
+        limit = min(self.maximum_size, int(environ.get('CONTENT_LENGTH') or 0))
         environ['wsgi.input'] = LimitedStream(environ['wsgi.input'], limit)
         return self.app(environ, start_response)
