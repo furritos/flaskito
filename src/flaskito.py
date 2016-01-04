@@ -13,7 +13,8 @@ def hello(name='sample'):
     
 @app.route('/hello2/')
 @app.route('/hello2/<name>')
-def hello2(name='sample'):
+def hello2(name='sample2'):
     return render_template('hello2.html', name=name)
+
 if __name__ == "__main__":
     app.run()

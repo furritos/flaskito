@@ -146,7 +146,7 @@ class SubPattern:
         UNITCODES = (ANY, RANGE, IN, LITERAL, NOT_LITERAL, CATEGORY)
         REPEATCODES = (MIN_REPEAT, MAX_REPEAT)
         for op, av in self.data:
-            if op is BRANCH:
+            if op == BRANCH:
                 i = sys.maxint
                 j = 0
                 for av in av[1]:
@@ -155,11 +155,11 @@ class SubPattern:
                     j = max(j, h)
                 lo = lo + i
                 hi = hi + j
-            elif op is CALL:
+            elif op == CALL:
                 i, j = av.getwidth()
                 lo = lo + i
                 hi = hi + j
-            elif op is SUBPATTERN:
+            elif op == SUBPATTERN:
                 i, j = av[1].getwidth()
                 lo = lo + i
                 hi = hi + j
@@ -437,7 +437,7 @@ def _parse(source, state):
                     # potential range
                     this = sourceget()
                     if this == "]":
-                        if code1[0] is IN:
+                        if code1[0] == IN:
                             code1 = code1[1][0]
                         setappend(code1)
                         setappend((LITERAL, ord("-")))
@@ -457,14 +457,14 @@ def _parse(source, state):
                     else:
                         raise error, "unexpected end of regular expression"
                 else:
-                    if code1[0] is IN:
+                    if code1[0] == IN:
                         code1 = code1[1][0]
                     setappend(code1)
 
             # XXX: <fl> should move set optimization to compiler!
-            if _len(set)==1 and set[0][0] is LITERAL:
+            if _len(set)==1 and set[0][0] == LITERAL:
                 subpatternappend(set[0]) # optimization
-            elif _len(set)==2 and set[0][0] is NEGATE and set[1][0] is LITERAL:
+            elif _len(set)==2 and set[0][0] == NEGATE and set[1][0] == LITERAL:
                 subpatternappend((NOT_LITERAL, set[1][1])) # optimization
             else:
                 # XXX: <fl> should add charmap optimization here
@@ -707,12 +707,12 @@ def parse_template(source, pattern):
     p = []
     a = p.append
     def literal(literal, p=p, pappend=a):
-        if p and p[-1][0] is LITERAL:
+        if p and p[-1][0] == LITERAL:
             p[-1] = LITERAL, p[-1][1] + literal
         else:
             pappend((LITERAL, literal))
     sep = source[:0]
-    if type(sep) is type(""):
+    if type(sep) == type(""):
         makechar = chr
     else:
         makechar = unichr
@@ -778,7 +778,7 @@ def parse_template(source, pattern):
     groupsappend = groups.append
     literals = [None] * len(p)
     for c, s in p:
-        if c is MARK:
+        if c == MARK:
             groupsappend((i, s))
             # literal[i] is already None
         else:
