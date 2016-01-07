@@ -19,7 +19,8 @@ To build the WAR file:
     
 To deploy the WAR file:
 
-* **NOTE:** The assumption is that Tomcat is locally deployed
+* **NOTE:** The assumption is that Tomcat is locally installed
+* Oracle `ojdbc6.jar` is required, version `11.2.0.4.0`, but not included
 * Copy `dist/flaskito.war` into `$TOMCAT/webapps`
 * Open up a web browser and browse to `http://localhost:8080/`
 
