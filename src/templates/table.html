@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Hello from Flask</title>
+</head>
+<body>
+<h1>If you see this, it works!</h1>
+<br>
+<table>
+    <tr>
+        <th><h3>Username</h3></th>
+        <th><h3>Email</h3></th>
+    </tr>
+    {% for item in data %}
+    <tr>
+        <td>{{ item.username }}</td>
+        <td>{{ item.email }}</td>
+    </tr>
+    {% endfor %}
+</table>
+</body>
+</html>

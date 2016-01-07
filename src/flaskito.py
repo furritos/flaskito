@@ -5,11 +5,16 @@ from sqlalchemy import Sequence
 from datetime import datetime
 
 app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI'] = 'oracle+zxjdbc://dojtest:oracle@10.1.0.201:31521/XE'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+# Set up Oracle URI for usage with this program (11g tested)
+app.config['SQLALCHEMY_DATABASE_URI'] = 'oracle+zxjdbc://username:password@localhost:1521/XE'
+
+# Set to True if you want to view the SQL commands in the log file
 app.config['SQLALCHEMY_ECHO'] = True  
 
 db = SQLAlchemy(app)
+
 
 class Post(db.Model):
     id = db.Column(db.Integer, Sequence('post_id_seq'), primary_key=True)
@@ -56,46 +61,37 @@ class User(db.Model):
     def __repr__(self):
         return '<User %r>' % self.username
 
-@app.route("/")
-def index():
-    return "New Flaskito rulastonico running on a Java web container."
-
-@app.route('/hello/')
-@app.route('/hello/<name>')
-def hello(name='sample'):
-    return render_template('hello.html', name=name)
-    
-@app.route('/hello2/')
-@app.route('/hello2/<name>')
-def hello2(name='sample2'):
-    return render_template('hello2.html', name=name)
-
+# Drop and Create all tables
 db.drop_all()
 db.create_all()
 
+# Populate User tables
 admin = User('admin', 'admin@example.com')
 guest = User('guest', 'guest@example.com')
-
+user = User('user', 'user@example.com')
+db.session.add(user)
 db.session.add(admin)
 db.session.add(guest)
 db.session.commit()
 
+# Populate Category and Post tables
 py = Category('Python')
 p = Post('Hello Python!', 'Python is pretty cool', py)
 db.session.add(py)
 db.session.add(p)
 db.session.commit()
 
-print User.query.filter(User.email.endswith('@example.com')).all()
+# Setup index route that uses SQLAlchemy
+@app.route("/")
+def index():
+    data = User.query.all()
+    return render_template('table.html', data=data)
 
-me = User('me', 'me@example.com')
-db.session.add(me)
-db.session.commit()
-
-print me.id
-
-db.session.delete(me)
-db.session.commit()
+# Setup hello route that uses simple HTML tempalting
+@app.route('/hello/')
+@app.route('/hello/<name>')
+def hello(name='sample'):
+    return render_template('hello.html', name=name)
 
 if __name__ == "__main__":
     app.run()
