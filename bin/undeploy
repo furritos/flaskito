@@ -1,7 +1,0 @@
-#!/bin/sh
-
-rm /opt/jetty/webapps/flaskito.war
-
-echo
-echo Undeploying was successful
-ls -la /opt/jetty/webapps/flaskito.war
